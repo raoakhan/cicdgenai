@@ -1,0 +1,148 @@
+name: E-commerce CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Set up Node.js environment
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+
+    # Cache npm dependencies
+    - name: Cache dependencies
+      uses: actions/cache@v2
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    # Install npm dependencies
+    - name: Install dependencies
+      run: npm install
+
+    # Run ESLint for code quality checks
+    - name: Run ESLint
+      run: npm run lint
+
+    # Run tests
+    - name: Run tests
+      run: npm test
+
+    # Build the project
+    - name: Build project
+      run: npm run build
+
+    # Upload build artifacts
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: build-artifacts
+        path: build/
+
+  security_scan:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Run OWASP ZAP for security scanning
+    - name: Run OWASP ZAP
+      run: |
+        docker pull owasp/zap2docker-stable
+        docker run -t owasp/zap2docker-stable zap-baseline.py -t http://localhost
+
+    # Run SonarQube scan for code analysis
+    - name: Run SonarQube Scan
+      uses: sonarsource/sonarcloud-github-action@master
+      with:
+        args: >
+          -Dsonar.projectKey=my_project
+          -Dsonar.organization=my_organization
+          -Dsonar.host.url=https://sonarcloud.io
+          -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
+  performance_test:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Run performance tests
+    - name: Run performance tests
+      run: npm run performance-test
+
+  deploy_development:
+    needs: [build, security_scan, performance_test]
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Deploy to development environment
+    - name: Deploy to development
+      env:
+        ENVIRONMENT: development
+        DEPLOYMENT_TARGET: dev-server
+        FEATURE_FLAGS: new-feature
+      run: echo "Deploying to development environment"
+
+  deploy_staging:
+    needs: [build, security_scan, performance_test]
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Deploy to staging environment
+    - name: Deploy to staging
+      env:
+        ENVIRONMENT: staging
+        DEPLOYMENT_TARGET: staging-server
+        FEATURE_FLAGS: new-feature
+      run: echo "Deploying to staging environment"
+
+  deploy_production:
+    needs: deploy_staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    # Checkout the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Deploy to production environment
+    - name: Deploy to production
+      env:
+        ENVIRONMENT: production
+        DEPLOYMENT_TARGET: prod-server
+        FEATURE_FLAGS: stable-feature
+      run: echo "Deploying to production server"
+
+    # Notify the team about the successful deployment
+    - name: Notify team
+      run: echo "Deployment to production completed successfully"
